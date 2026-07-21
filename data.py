@@ -54,12 +54,36 @@ def _eval_tf() -> transforms.Compose:
     ])
 
 
+_DOWNLOAD_HELP = """
+Could not obtain CIFAR-100 automatically ({err}).
+
+On macOS this is usually not a network problem: Python ships its own CA bundle and
+often cannot verify the certificate, so torchvision's downloader fails with
+CERTIFICATE_VERIFY_FAILED even though the site is reachable. Fetch it once with
+curl, which uses the system trust store, then re-run -- torchvision will find the
+local archive and extract it:
+
+    mkdir -p {root}
+    curl -C - -fSL -o {root}/cifar-100-python.tar.gz \\
+        https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz
+
+The server is slow and drops connections; `-C -` resumes rather than restarting.
+The finished file is ~169 MB and its md5 is eb9058c3a382ffc7106e4002c42a8d85.
+"""
+
+
 class HierCIFAR100(Dataset):
     """Wraps CIFAR100 so each item is (image, coarse_label, fine_label)."""
 
     def __init__(self, root: str = "./data", train: bool = True, download: bool = True):
         tf = _train_tf() if train else _eval_tf()
-        self.base = CIFAR100(root=root, train=train, download=download, transform=tf)
+        try:
+            self.base = CIFAR100(root=root, train=train, download=download, transform=tf)
+        except Exception as err:  # noqa: BLE001 - re-raised below with guidance
+            # torchvision surfaces this as URLError/RuntimeError depending on the
+            # failure; either way the useful thing is the manual fetch command,
+            # not a urllib traceback.
+            raise RuntimeError(_DOWNLOAD_HELP.format(err=err, root=root.rstrip("/"))) from err
 
     def __len__(self) -> int:
         return len(self.base)
