@@ -50,12 +50,23 @@ gradient** — it's a monitoring number dressed as a loss. Stage 4 proves this, 
 differentiable version:
 
 ```
-SoftHierarchyLoss = −log( Σ fine_softmax mass landing inside the TRUE superclass )
+SoftHierarchyLoss = −log( Σ fine-class probability mass inside the TRUE superclass )
                   = NLL of the true parent under the fine distribution marginalized up the tree
 ```
 
-Marginalize the fine softmax up to the parent (`probs @ Mᵀ`) and take the NLL of the true coarse label.
-Gradient flows into the fine logits; the model actually learns to keep its mass in the right superclass.
+The fix is to stop asking *"which class won?"* (a step function — flat almost everywhere, so zero gradient)
+and start asking *"how much probability landed in the right block?"* (smooth in every logit).
+
+The linear algebra: let `M` be the `(20 × 100)` membership matrix with `M[c,f] = 1` iff `f` is a child of `c`.
+Every column holds exactly one 1, so `M` is the one-hot encoding of parenthood — and `probs @ Mᵀ` is precisely
+the vector of parent marginals. **Marginalizing up a tree is a matrix product**; the taxonomy stops being
+control flow and becomes a linear operator, which is why it's differentiable at all.
+
+In code it's evaluated in log-space (`log_softmax` → `masked_fill(-inf)` → `logsumexp`) rather than literally
+forming `probs @ Mᵀ`. Same quantity, but exact in the tail: once the mass in a parent drops below ~1e-45 it
+flushes to 0 in float32 and the naive form returns `log(0) = -inf`, usually patched with an `eps` that silently
+caps the loss and biases the gradient. There's a test pinning this exact case.
+
 See `losses.SoftHierarchyLoss` and the reusable `structured_loss.SoftHierarchyLoss`.
 
 ## Other things I changed (and why)

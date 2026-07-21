@@ -70,17 +70,38 @@ def draw_tree(path: str = f"{RUNS}/hierarchy_tree.png") -> str:
 # ---------------------------------------------------------------------------
 def block_confusion(y_true_fine: np.ndarray, y_pred_fine: np.ndarray,
                     title: str, path: str) -> str:
-    """100x100 confusion matrix reordered so each superclass is a 5x5 diagonal
-    block. Errors *inside* a block stay in-superclass (mild); off-block errors
-    cross the taxonomy (what the hierarchy losses should suppress)."""
+    """The 100x100 confusion matrix, read in the taxonomy's basis.
+
+    A confusion matrix C has C[i, j] = #(true i, predicted j). Relabelling the
+    classes by a permutation is a similarity transform C -> P C P.T: applying P
+    on the left permutes rows, P.T on the right permutes columns, and doing BOTH
+    keeps the diagonal on the diagonal. No information is added or lost -- we are
+    only choosing a better basis. Ordering by FINE_BLOCK_ORDER puts siblings
+    adjacent, so each superclass becomes a 5x5 block on the diagonal.
+
+    That makes the interesting distinction visible at a glance: mass inside a
+    diagonal block is a within-superclass mix-up (calling a maple an oak), while
+    mass off the blocks is a mistake that crossed the taxonomy (calling a maple a
+    motorcycle). Those are not equally bad errors, and a flat accuracy number
+    cannot tell them apart. Suppressing the off-block mass is precisely the job
+    of the hierarchy losses.
+
+    We build C by accumulation rather than sklearn's confusion_matrix so the
+    permutation is applied while counting -- `pos` maps a class id to its row in
+    the new basis, which is P applied index-wise instead of materializing a
+    100x100 permutation matrix and doing two matmuls for the same result.
+    """
     _ensure_runs()
-    order = FINE_BLOCK_ORDER
-    pos = {fine: i for i, fine in enumerate(order)}
+    pos = {fine: i for i, fine in enumerate(FINE_BLOCK_ORDER)}
     cm = np.zeros((100, 100))
     for t, p in zip(y_true_fine, y_pred_fine):
         cm[pos[int(t)], pos[int(p)]] += 1
-    row = cm.sum(1, keepdims=True)
-    cm = cm / np.clip(row, 1, None)
+
+    # Row-normalize: row i becomes the conditional distribution P(predicted | true=i),
+    # so every row sums to 1 and rare and common classes are comparable. clip(...,1,None)
+    # guards the 0/0 for any class absent from this split -- without it those rows
+    # would be NaN and imshow would render them as holes.
+    cm = cm / np.clip(cm.sum(1, keepdims=True), 1, None)
 
     fig, ax = plt.subplots(figsize=(9, 8))
     im = ax.imshow(cm, cmap="magma", vmin=0, vmax=0.5)
@@ -140,10 +161,28 @@ class EmbeddingEvolution:
         self._pca: PCA | None = None
 
     def record(self, epoch: int, feats: np.ndarray, coarse: np.ndarray) -> None:
+        """Project this epoch's 256-D features to 2-D and stash them.
+
+        PCA centres the data and takes the top two eigenvectors of its covariance
+        matrix -- the two orthogonal directions of greatest variance -- then
+        projects onto them. It is the best possible 2-D *linear* summary in the
+        least-squares sense (Eckart-Young), which is what we want here: we are
+        asking whether the superclasses have become linearly separated, so a
+        nonlinear embedding like t-SNE or UMAP would beg the question by
+        manufacturing clusters even from noise.
+
+        The subtle part is `fit` ONCE, on the first snapshot, then only
+        `transform` afterwards. Re-fitting every epoch would choose new axes each
+        time, so the cloud would spin between frames and we could not tell real
+        movement from a rotating coordinate system. Fixing the basis at epoch 0
+        means everything you see move in the GIF is the representation actually
+        moving.
+        """
         if feats.shape[0] > self.max_points:
+            # Seeded generator so the same points are tracked in every frame; a
+            # fresh random subset per epoch would make points flicker in and out.
             idx = np.random.default_rng(0).choice(feats.shape[0], self.max_points, replace=False)
             feats, coarse = feats[idx], coarse[idx]
-        # Fit PCA once (on the first snapshot) so axes are stable across epochs.
         if self._pca is None:
             self._pca = PCA(n_components=2).fit(feats)
         self.snaps.append((epoch, self._pca.transform(feats), coarse))

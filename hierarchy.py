@@ -61,22 +61,45 @@ COARSE_TO_FINE: dict[int, list[int]] = {c: [] for c in range(NUM_COARSE)}
 for _fine, _coarse in enumerate(SPARSE2COARSE):
     COARSE_TO_FINE[_coarse].append(_fine)
 
-# Order fine labels by (coarse, fine) so confusion matrices form clean superclass
-# blocks along the diagonal. `FINE_BLOCK_ORDER[k]` is the fine id at block row k.
+# A permutation of the 100 fine ids, grouped by parent. CIFAR-100's label ordering
+# is alphabetical, which scatters siblings all over the index range; relabelling in
+# this order is a change of basis by a permutation matrix P, and applying it to a
+# confusion matrix as P C P.T (see viz.block_confusion) moves every sibling pair
+# adjacent. Structure that was invisible becomes 5x5 blocks on the diagonal --
+# the matrix did not change, only the basis we read it in.
 FINE_BLOCK_ORDER: list[int] = [f for c in range(NUM_COARSE) for f in COARSE_TO_FINE[c]]
 
 
 def coarse_of(fine_labels: torch.Tensor) -> torch.Tensor:
-    """Map a batch of fine labels (long) to their coarse labels, on the same device."""
+    """Send a batch of fine labels to their parents.
+
+    The taxonomy is a function from {0..99} to {0..19}, and a function on a finite
+    domain is just a table. So "look up the parent" is an indexing operation, not
+    a search: `lut[fine_labels]` is advanced indexing, which gathers one entry per
+    element of `fine_labels` in a single vectorized kernel and returns a tensor
+    shaped like the index, not like the table. That replaces the per-sample
+    membership test the upstream code ran in Python, and it keeps the whole thing
+    on-device -- we build the table on `fine_labels.device` so no batch is ever
+    dragged back to the CPU mid-metric.
+    """
     lut = torch.as_tensor(SPARSE2COARSE, dtype=torch.long, device=fine_labels.device)
     return lut[fine_labels]
 
 
 def parent_matrix(device: torch.device | str = "cpu") -> torch.Tensor:
-    """(NUM_COARSE x NUM_FINE) 0/1 membership matrix M[c, f] = 1 iff fine f is under coarse c.
+    """The membership matrix M, shape (20, 100), with M[c, f] = 1 iff f is a child of c.
 
-    Used by the *differentiable* soft-hierarchy loss to marginalize fine
-    probabilities up to their parent: p_coarse = fine_probs @ M.T .
+    This is the taxonomy written as linear algebra. Because every fine class has
+    exactly one parent, each COLUMN of M is a one-hot vector -- M is the one-hot
+    encoding of the parent function above. Two consequences we actually use:
+
+      * M @ ones(100)  = the number of children per parent (row sums = 5 here).
+      * probs @ M.T    = the parent marginals, since entry c of the result is
+                         sum_{f in children(c)} probs_f.
+
+    That second identity is the whole trick behind SoftHierarchyLoss: summing a
+    distribution over groups is a linear operator, and linear operators are
+    differentiable. The tree stops being control flow and becomes a matrix.
     """
     m = torch.zeros(NUM_COARSE, NUM_FINE, device=device)
     for f, c in enumerate(SPARSE2COARSE):

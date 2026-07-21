@@ -13,12 +13,27 @@ from torchvision.datasets import CIFAR100
 
 from hierarchy import SPARSE2COARSE
 
-# Standard CIFAR-100 channel stats.
+# Per-channel mean and standard deviation of the CIFAR-100 training set.
 _MEAN = (0.5071, 0.4866, 0.4409)
 _STD = (0.2673, 0.2564, 0.2762)
 
 
 def _train_tf() -> transforms.Compose:
+    """Augmentation + standardization for training.
+
+    Normalize applies (x - mean) / std per channel, i.e. an affine map with a
+    diagonal matrix. Diagonal matters: each channel is rescaled independently, so
+    no colour mixing happens -- we are only recentring the input cloud on the
+    origin and making its per-axis spread ~1. Gradient descent cares because the
+    curvature of the loss along an input direction scales with that input's
+    magnitude; leaving channels on different scales gives the Hessian a large
+    condition number, and the step size that is stable for the widest direction
+    then crawls along the others.
+
+    Crop and flip come BEFORE ToTensor because they are PIL-level ops, and the
+    order is deliberate: augment the raw image, then convert, then standardize
+    with the statistics that describe the raw data.
+    """
     return transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
@@ -28,6 +43,11 @@ def _train_tf() -> transforms.Compose:
 
 
 def _eval_tf() -> transforms.Compose:
+    """Standardization only -- augmentation at test time would make the number noisy.
+
+    Uses the TRAINING set's mean/std, not the test set's. Computing statistics
+    from the test data would leak information about it into the pipeline.
+    """
     return transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(_MEAN, _STD),

@@ -37,7 +37,21 @@ from viz import plot_violation_comparison
 
 
 def grad_probe(device) -> None:
-    """Part A — demonstrate the dead gradient, then a live one."""
+    """Part A — demonstrate the dead gradient, then a live one.
+
+    What to watch for. Autograd records a graph only over differentiable ops; the
+    node that produced a tensor is stored in `.grad_fn`. argmax and `==` return
+    tensors with no grad_fn, because they are piecewise-constant: perturb a logit
+    infinitesimally and the output does not move, so the derivative is 0 almost
+    everywhere and undefined at the jumps. PyTorch does not raise -- it simply
+    hands back a tensor detached from the graph, which is why this bug survives
+    code review and a loss curve that looks perfectly reasonable.
+
+    The tell is `requires_grad=False` on a quantity you are about to add to your
+    objective. Adding a constant to a loss changes its printed value while leaving
+    every gradient identical, so the training run looks fine and learns nothing
+    from that term. Part B measures the consequence.
+    """
     print("\n=== Part A: does the dependency loss have a gradient? ===")
     model = CoarseToFineModel().to(device)
     train_loader, _ = make_loaders(batch_size=128)
