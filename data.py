@@ -53,10 +53,17 @@ class HierCIFAR100(Dataset):
 def make_loaders(
     root: str = "./data",
     batch_size: int = 256,
-    num_workers: int = 2,
+    num_workers: int = 0,
     download: bool = True,
 ) -> tuple[DataLoader, DataLoader]:
-    """Return (train_loader, test_loader). Small batches keep MPS memory calm."""
+    """Return (train_loader, test_loader). Small batches keep MPS memory calm.
+
+    num_workers defaults to 0 deliberately. On macOS, DataLoader workers use the
+    `spawn` start method, and combining them with MPS reliably deadlocks here:
+    the workers park asleep and the main process blocks forever on the first
+    batch. CIFAR-100 is 32x32 and lives in RAM, so in-process loading is fast
+    enough that workers buy nothing anyway. Override at your own risk on Linux.
+    """
     train_ds = HierCIFAR100(root=root, train=True, download=download)
     test_ds = HierCIFAR100(root=root, train=False, download=download)
     train_loader = DataLoader(
