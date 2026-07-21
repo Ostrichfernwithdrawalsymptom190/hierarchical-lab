@@ -96,6 +96,7 @@ def test_soft_loss_low_when_mass_in_true_parent_high_when_not():
 
 
 def test_soft_loss_equals_neg_log_mass_in_parent():
+    """Cross-check the log-space implementation against the naive definition."""
     torch.manual_seed(3)
     logits = torch.randn(4, 100)
     coarse = torch.randint(0, 20, (4,))
@@ -103,10 +104,34 @@ def test_soft_loss_equals_neg_log_mass_in_parent():
     expected = 0.0
     for b in range(4):
         mass = sum(probs[b, f] for f in range(100) if SPARSE2COARSE[f] == coarse[b].item())
-        expected += -torch.log(mass + 1e-8)
+        expected += -torch.log(mass)
     expected /= 4
     got = SoftHierarchyLoss()(logits, coarse)
     assert torch.allclose(got, expected, atol=1e-5)
+
+
+def test_soft_loss_stays_finite_where_the_naive_form_underflows():
+    """The reason for logsumexp rather than log(sum(softmax(.))).
+
+    With logits this extreme the true mass in the wrong parent is ~e^-2000, which
+    flushes to exactly 0 in float32. Computing probabilities first would give
+    log(0) = -inf (or a silently epsilon-capped value); the log-space form returns
+    the correct large-but-finite number and a usable gradient.
+    """
+    logits = torch.full((1, 100), -1000.0)
+    logits[0, 0] = 1000.0                      # all mass on fine class 0
+    wrong_parent = torch.tensor([(SPARSE2COARSE[0] + 1) % 20])
+
+    naive_mass = F.softmax(logits, dim=1)[0, [f for f in range(100)
+                                              if SPARSE2COARSE[f] == wrong_parent.item()]].sum()
+    assert naive_mass.item() == 0.0            # the naive route has already died
+
+    logits.requires_grad_(True)
+    loss = SoftHierarchyLoss()(logits, wrong_parent)
+    assert torch.isfinite(loss)
+    assert loss.item() > 100
+    loss.backward()
+    assert torch.isfinite(logits.grad).all()
 
 
 # --- Layer loss + metrics ---------------------------------------------------

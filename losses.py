@@ -1,14 +1,13 @@
-"""The hierarchy losses — the heart of the whole exercise.
+"""The hierarchy losses — where the taxonomy meets the optimizer.
 
-Three things live here:
+Three objects live here:
 
-  1. layer_loss           — their `lloss`: per-level cross-entropy. Fine and healthy.
-  2. faithful_dloss       — their `dloss`, ported verbatim in spirit. We keep it
-                            ONLY to prove (Stage 4) that it has no gradient path.
-  3. SoftHierarchyLoss    — my differentiable replacement: push fine probability
-                            mass into the true parent's children via marginalization.
-
-Plus small metrics (accuracy, hierarchy-violation rate) used by every stage.
+  1. layer_loss        their `lloss`: per-level cross-entropy. Healthy.
+  2. faithful_dloss    their `dloss`, ported faithfully. Kept ONLY as evidence:
+                       it is piecewise-constant and therefore carries no gradient.
+  3. SoftHierarchyLoss the differentiable replacement, built on the observation
+                       that "does the child respect its parent?" is a
+                       MARGINALIZATION — a linear map — not a comparison.
 """
 
 from __future__ import annotations
@@ -21,25 +20,60 @@ from hierarchy import coarse_of, parent_matrix
 
 
 # ----------------------------------------------------------------------------
-# 1. Layer loss (their lloss) — deep supervision, one CE per level.
+# 1. Layer loss
 # ----------------------------------------------------------------------------
 def layer_loss(coarse_logits, fine_logits, coarse_true, fine_true, alpha: float = 1.0):
-    lloss = F.cross_entropy(coarse_logits, coarse_true) + F.cross_entropy(fine_logits, fine_true)
-    return alpha * lloss
+    """L = alpha * ( CE(coarse) + CE(fine) ).
+
+    Cross-entropy here is the negative log-likelihood of the true class under the
+    softmax distribution: CE = -log p(y_true). Adding the two levels is not an
+    arbitrary "multi-task weighting" — it is the log of a product. Maximizing
+    log p(coarse) + log p(fine) maximizes p(coarse) * p(fine), i.e. we are fitting
+    the two levels as if they were independent. That independence assumption is
+    precisely what is wrong with this objective on its own, and precisely the gap
+    the dependency loss below is trying (and failing) to close.
+    """
+    return alpha * (F.cross_entropy(coarse_logits, coarse_true)
+                    + F.cross_entropy(fine_logits, fine_true))
 
 
 # ----------------------------------------------------------------------------
-# 2. Their dependency loss, ported faithfully — the cautionary tale.
-#    Built from argmax + comparisons, so it is CONSTANT w.r.t. the weights:
-#    every tensor it touches is detached by argmax/`==`. Kept to be dissected.
+# 2. Their dependency loss — the cautionary tale
 # ----------------------------------------------------------------------------
 def faithful_dloss(coarse_logits, fine_logits, coarse_true, fine_true,
                    beta: float = 0.8, p_loss: float = 3.0):
-    coarse_pred = torch.argmax(F.softmax(coarse_logits, dim=1), dim=1)   # <- detaches
-    fine_pred = torch.argmax(F.softmax(fine_logits, dim=1), dim=1)       # <- detaches
+    """Reproduces the upstream dependency loss so we can dissect it.
 
-    # D_l = 1 when the fine prediction is NOT a child of the coarse prediction.
-    # (Vectorized version of their per-sample Python loop over numeric_hierarchy.)
+    The intent is right: charge the network extra when the fine prediction is not
+    a child of the coarse prediction. The execution kills it. Every quantity below
+    is obtained by argmax or by an equality test, and both are *piecewise-constant*
+    functions of the logits: nudge a logit by a hair and the argmax does not move,
+    so the derivative is 0 almost everywhere (and undefined at the jumps). A
+    function that is flat almost everywhere transmits no information to gradient
+    descent. Autograd reports this honestly by never building a graph node at all,
+    so the returned tensor has requires_grad=False and cannot even .backward().
+
+    Two pieces of algebra worth seeing:
+
+      p^(D*l_prev) * p^(D*l_curr) = p^(D*(l_prev + l_curr))
+
+    so the penalty only depends on D times the NUMBER of wrong levels: it takes
+    the values {0, 2, 8} for p=3, namely p^0-1, p^1-1, p^2-1. And note D=1 forces
+    at least one level to be wrong: if both predictions were correct, the fine
+    truth's parent is the coarse truth by construction, so the pair would be
+    consistent and D would be 0. The penalty is therefore only ever charged on
+    top of an already-incorrect prediction.
+    """
+    coarse_pred = torch.argmax(coarse_logits, dim=1)
+    fine_pred = torch.argmax(fine_logits, dim=1)
+    # Softmax is monotonic, so argmax(softmax(z)) == argmax(z); the upstream code
+    # applies softmax first, which changes nothing but the runtime.
+
+    # D = 1 when the predicted child does not sit under the predicted parent.
+    # Because the taxonomy is a partition (every fine class has exactly ONE
+    # parent), "is fine_pred among the children of coarse_pred" reduces to a
+    # single table lookup instead of the upstream per-sample Python membership
+    # test over a dict of lists.
     D_l = (coarse_of(fine_pred) != coarse_pred).float()
 
     l_prev = torch.where(coarse_pred == coarse_true, 0.0, 1.0)
@@ -50,24 +84,64 @@ def faithful_dloss(coarse_logits, fine_logits, coarse_true, fine_true,
 
 
 # ----------------------------------------------------------------------------
-# 3. The differentiable fix. Marginalize fine softmax up to the parent
-#    (p_coarse = fine_probs @ Mᵀ) and take NLL of the TRUE coarse label:
-#    -log(probability mass the fine head placed inside the correct superclass).
-#    Gradient flows straight into the fine logits — this one actually teaches.
+# 3. The differentiable replacement
 # ----------------------------------------------------------------------------
 class SoftHierarchyLoss(nn.Module):
-    def __init__(self, beta: float = 1.0, eps: float = 1e-8):
+    """L = -log( sum of fine probability mass sitting inside the TRUE superclass ).
+
+    The idea that makes this differentiable: stop asking "which class won?" and
+    start asking "how much probability landed in the right block?". The first is
+    a step function; the second is smooth in every logit.
+
+    The linear algebra. Let M be the (20 x 100) membership matrix with
+    M[c, f] = 1 exactly when fine class f is a child of coarse class c. Each
+    column holds a single 1 (one parent per child), so M is the one-hot encoding
+    of parenthood. For a probability row-vector p over the 100 fine classes,
+
+        p @ M.T   ->   a 20-vector whose c-th entry is  sum_{f in children(c)} p_f
+
+    which is exactly the marginal probability of the parent. So marginalizing a
+    distribution up a tree IS a matrix product against the membership matrix; the
+    tree structure lives entirely in M. Grouping/aggregation and matrix
+    multiplication are the same operation here.
+
+    Why compute it in log-space instead of literally doing `probs @ M.T`. The
+    quantity we want is
+
+        -log sum_{f in children(c)} exp(z_f) / sum_j exp(z_j)
+
+    Forming the probabilities first, summing, then taking a log invites underflow:
+    if the mass in the parent is ~1e-45 the sum flushes to 0 and the log returns
+    -inf (the usual patch is to add an epsilon, which silently caps the loss and
+    biases the gradient). Instead we take log_softmax, which computes
+    z - logsumexp(z) with the max subtracted internally, then reduce the children
+    with torch.logsumexp. logsumexp(x) = max(x) + log sum exp(x - max(x)) never
+    overflows and stays exact deep into the tail, so no epsilon is needed and the
+    gradient is right even when the model is confidently wrong -- which is exactly
+    when this loss has the most to say.
+
+    We select the children with masked_fill(-inf) rather than multiplying by M:
+    exp(-inf) = 0 contributes nothing to the sum, whereas multiplying probabilities
+    by a 0/1 mask would put a hard zero *inside* a log.
+    """
+
+    def __init__(self, beta: float = 1.0):
         super().__init__()
         self.beta = beta
-        self.eps = eps
-        # Registered so .to(device) moves it with the model.
+        # register_buffer (not a plain attribute) so M rides along on .to(device)
+        # and is saved in state_dict, without ever being treated as a parameter.
         self.register_buffer("M", parent_matrix())
 
-    def forward(self, fine_logits, coarse_true):
-        fine_probs = F.softmax(fine_logits, dim=1)          # (B, 100), differentiable
-        coarse_from_fine = fine_probs @ self.M.t()          # (B, 20) marginalized
-        mass_in_parent = coarse_from_fine.gather(1, coarse_true.unsqueeze(1)).squeeze(1)
-        return self.beta * (-torch.log(mass_in_parent + self.eps)).mean()
+    def forward(self, fine_logits: torch.Tensor, coarse_true: torch.Tensor) -> torch.Tensor:
+        log_p_fine = F.log_softmax(fine_logits, dim=1)
+
+        # Row c of M indicates c's children, so indexing M by the batch of true
+        # parents broadcasts a (B, 100) sibling mask in one gather -- no loop.
+        sibling_mask = self.M[coarse_true]
+        masked = log_p_fine.masked_fill(sibling_mask == 0, float("-inf"))
+
+        log_mass_in_parent = torch.logsumexp(masked, dim=1)
+        return self.beta * (-log_mass_in_parent).mean()
 
 
 # ----------------------------------------------------------------------------
@@ -80,19 +154,24 @@ def accuracy(logits, target) -> float:
 
 @torch.no_grad()
 def violation_rate(coarse_logits, fine_logits) -> float:
-    """% of samples where the fine prediction's parent != the coarse prediction.
+    """% of samples where the two heads contradict each other about the taxonomy.
 
-    This is exactly what the dependency loss is *supposed* to drive down; we plot
-    it across stages to see which mechanisms actually move it.
+    This is the model's INTERNAL consistency: it compares the parent implied by
+    the fine prediction against the coarse head's own prediction, ignoring the
+    ground truth entirely. A model can be inconsistent while both heads are wrong,
+    or consistent while both are wrong together. Kept separate from accuracy for
+    that reason -- it is the quantity the dependency loss claims to minimize.
     """
-    coarse_pred = coarse_logits.argmax(1)
-    fine_pred = fine_logits.argmax(1)
-    return (coarse_of(fine_pred) != coarse_pred).float().mean().item() * 100.0
+    return (coarse_of(fine_logits.argmax(1)) != coarse_logits.argmax(1)).float().mean().item() * 100.0
 
 
 @torch.no_grad()
 def flat_violation_rate(fine_logits, coarse_true) -> float:
-    """For the flat model (no coarse head): does the fine prediction land in the
-    TRUE superclass? Lets Stage 1 report a comparable number."""
-    fine_pred = fine_logits.argmax(1)
-    return (coarse_of(fine_pred) != coarse_true).float().mean().item() * 100.0
+    """Violation measured against the TRUE parent, for models with no coarse head.
+
+    Stage 1 has only one head, so there is no second opinion to contradict; we ask
+    instead whether the predicted fine class at least lands in the correct
+    superclass. Note this is a strictly harder bar than violation_rate above --
+    it is 100 - (coarse accuracy) -- so the two numbers are not interchangeable.
+    """
+    return (coarse_of(fine_logits.argmax(1)) != coarse_true).float().mean().item() * 100.0

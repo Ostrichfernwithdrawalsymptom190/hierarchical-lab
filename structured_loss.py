@@ -25,7 +25,13 @@ import torch.nn.functional as F
 
 
 def build_parent_matrix(child_to_parent: list[int]) -> torch.Tensor:
-    """(num_parents x num_children) 0/1 membership matrix from a child->parent map."""
+    """Membership matrix M, shape (num_parents, num_children), M[p, c] = 1 iff c is under p.
+
+    Each column carries exactly one 1, so M is the one-hot encoding of the
+    child->parent function. Its usefulness is the identity `probs @ M.T`, which
+    sums each parent's children into that parent's slot -- marginalization up the
+    tree expressed as a single linear map.
+    """
     num_children = len(child_to_parent)
     num_parents = max(child_to_parent) + 1
     m = torch.zeros(num_parents, num_children)
@@ -35,33 +41,57 @@ def build_parent_matrix(child_to_parent: list[int]) -> torch.Tensor:
 
 
 class SoftHierarchyLoss(nn.Module):
-    """Differentiable "child prediction must respect its parent" loss.
+    """Differentiable "the child must respect its parent" loss.
 
-    loss = -log( sum of fine-class probability the model put inside the TRUE parent )
+        loss = -log( probability mass the model placed inside the TRUE parent )
 
-    Marginalizes fine softmax up to the parent (probs @ Mᵀ) and takes the NLL of
-    the true parent. Gradient flows into the fine logits, so the model actually
-    learns to keep its probability mass in the right superclass.
+    The design decision worth copying: measure MASS, not the winner. "Is the
+    argmax child under the right parent?" is a step function of the logits -- flat
+    almost everywhere, so its gradient is zero and it teaches nothing. "How much
+    probability landed in the right group?" varies smoothly with every logit, so
+    gradient descent can act on it.
+
+    Computed in log-space. The definition is
+
+        -log sum_{c in children(p)} exp(z_c) / sum_j exp(z_j)
+
+    Building probabilities first and then taking a log underflows: once the mass
+    in the parent drops below ~1e-45 the sum is exactly 0 in float32 and the log
+    is -inf, which is usually patched with an epsilon that quietly caps the loss
+    and biases the gradient. log_softmax followed by logsumexp subtracts the max
+    internally, so it is exact far into the tail and needs no epsilon -- and the
+    tail is exactly where a confidently-wrong model lives.
+
+    Children are selected with masked_fill(-inf) instead of multiplying by M,
+    because exp(-inf)=0 drops those terms from the sum cleanly, whereas masking
+    probabilities to 0 would place a hard zero inside a logarithm.
     """
 
-    def __init__(self, child_to_parent: list[int], beta: float = 1.0, eps: float = 1e-8):
+    def __init__(self, child_to_parent: list[int], beta: float = 1.0):
         super().__init__()
         self.beta = beta
-        self.eps = eps
+        # Buffers, not parameters: they must follow .to(device) and land in
+        # state_dict, but they are fixed structure and must never get gradients.
         self.register_buffer("M", build_parent_matrix(child_to_parent))
         self.register_buffer("child_to_parent",
                              torch.tensor(child_to_parent, dtype=torch.long))
 
     def forward(self, fine_logits: torch.Tensor, parent_target: torch.Tensor) -> torch.Tensor:
-        fine_probs = F.softmax(fine_logits, dim=1)
-        parent_probs = fine_probs @ self.M.t()
-        mass = parent_probs.gather(1, parent_target.unsqueeze(1)).squeeze(1)
-        return self.beta * (-torch.log(mass + self.eps)).mean()
+        log_p = F.log_softmax(fine_logits, dim=1)
+        # Row p of M indicates p's children, so indexing by the batch of targets
+        # yields a (B, num_children) sibling mask in one gather.
+        sibling_mask = self.M[parent_target]
+        masked = log_p.masked_fill(sibling_mask == 0, float("-inf"))
+        return self.beta * (-torch.logsumexp(masked, dim=1)).mean()
 
     @torch.no_grad()
     def violation_rate(self, fine_logits: torch.Tensor,
                        parent_pred_or_target: torch.Tensor) -> float:
-        """% of samples whose argmax fine class sits under a different parent."""
-        fine_pred = fine_logits.argmax(1)
-        implied_parent = self.child_to_parent[fine_pred]
+        """% of samples whose argmax child sits under a different parent.
+
+        Pass the coarse head's prediction to measure the model's internal
+        self-consistency, or the true parent to measure correctness. Both are
+        meaningful; they answer different questions.
+        """
+        implied_parent = self.child_to_parent[fine_logits.argmax(1)]
         return (implied_parent != parent_pred_or_target).float().mean().item() * 100.0
