@@ -1,0 +1,50 @@
+ATTRIBUTION AND THIRD-PARTY NOTICES
+===================================
+
+This project (hierarchical-lab) is a study project and reimplementation that is
+inspired by, and derived in part from, the following work:
+
+    Deep_Hierarchical_Classification
+    https://github.com/Ugenteraan/Deep_Hierarchical_Classification
+    Copyright (c) 2021 Ugenteraan Manogaran
+    Licensed under the MIT License.
+
+Specifically, the following portions of this project follow that project's
+approach and should be considered derived from it:
+
+  * models.py — the coarse-to-fine classifier head, in which the coarse (20-way)
+    logits are concatenated into the fine (100-way) head. This mirrors the
+    structure of `model/resnet50.py` in the original project.
+
+  * losses.py — the layer loss (`layer_loss`) and the dependency loss
+    (`faithful_dloss`). The dependency loss is reproduced faithfully from
+    `model/hierarchical_loss.py` for the purpose of analysis and discussion.
+
+  * hierarchy.py — the CIFAR-100 superclass/subclass taxonomy, equivalent in
+    content to `level_dict.py` in the original project.
+
+The MIT License terms of the original work continue to apply to those portions.
+The full text of the MIT License is reproduced in the LICENSE file of this
+repository and applies equally to the original work.
+
+The original project is itself an unofficial implementation of the paper:
+
+    "Deep Hierarchical Classification for Category Prediction in E-commerce System"
+    Wan, Zhang, Liu, Zhao, Xu, Wang (2020)
+    https://arxiv.org/abs/2005.06692
+
+Where this repository critiques aspects of the original implementation, those
+critiques are offered as good-faith technical observations about specific
+implementation details, not as criticism of the project or its author. The
+original being public and readable is what made this study possible.
+
+
+DATASET
+-------
+
+CIFAR-100 is used for the experiments in this repository. It is not distributed
+with this project; it is downloaded at runtime.
+
+    Learning Multiple Layers of Features from Tiny Images
+    Alex Krizhevsky, 2009
+    https://www.cs.toronto.edu/~kriz/cifar.html

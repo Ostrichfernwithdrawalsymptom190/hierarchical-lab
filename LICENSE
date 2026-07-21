@@ -19,22 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
---------------------------------------------------------------------------------
-
-This project is a study/reimplementation inspired by and derived in part from:
-
-    Deep_Hierarchical_Classification
-    https://github.com/Ugenteraan/Deep_Hierarchical_Classification
-    Copyright (c) 2021 Ugenteraan Manogaran
-    Licensed under the MIT License.
-
-Portions of the loss formulation (the layer loss and the dependency loss
-reproduced in losses.py for analysis) and the coarse-to-fine classifier head
-in models.py follow that project's approach. Its MIT license terms are
-reproduced above and continue to apply to those portions.
-
-That work is in turn an unofficial implementation of:
-
-    "Deep Hierarchical Classification for Category Prediction in E-commerce System"
-    Wan et al., 2020 — https://arxiv.org/abs/2005.06692

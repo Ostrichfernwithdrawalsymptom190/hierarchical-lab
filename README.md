@@ -19,7 +19,7 @@ CIFAR-100's 100 fine classes nest under 20 coarse superclasses — a real taxono
 > Where this repo critiques the original (see *"The bug that's the best lesson"* below), it's offered in
 > good faith as a technical observation about one implementation detail — not as a knock on a project that
 > was generous enough to be public and readable in the first place. Being able to read real code and learn
-> from it is the whole point. See [`LICENSE`](LICENSE) for full attribution.
+> from it is the whole point. See [`NOTICE`](NOTICE) for full attribution details.
 
 Runs on Apple-Silicon **MPS** in seconds/epoch with a small CNN, so you can iterate and *watch* what changes.
 
