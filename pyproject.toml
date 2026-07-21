@@ -1,0 +1,24 @@
+[project]
+name = "hierarchical-lab"
+version = "0.1.0"
+description = "A hands-on pathway for structured/hierarchical classification, built from lessons in Deep_Hierarchical_Classification."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.11.1",
+    "numpy>=2.5.1",
+    "scikit-learn>=1.9.0",
+    "torch>=2.13.0",
+    "torchvision>=0.28.0",
+    "tqdm>=4.69.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.15.22",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+addopts = "-q"
