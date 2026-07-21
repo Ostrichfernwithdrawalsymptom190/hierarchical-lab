@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from hierarchy import SPARSE2COARSE
 from losses import (
+    HeadAgreementLoss,
     SoftHierarchyLoss,
     accuracy,
     faithful_dloss,
@@ -172,3 +173,35 @@ def test_accuracy():
     logits = torch.tensor([[0.1, 0.9], [0.8, 0.2], [0.2, 0.8]])
     target = torch.tensor([1, 0, 0])  # 2 of 3 correct
     assert accuracy(logits, target) == pytest.approx(200 / 3)
+
+
+# --- Head agreement loss ----------------------------------------------------
+def test_agreement_loss_is_zero_when_heads_agree_exactly():
+    """If the coarse head equals the fine head's marginal, KL(m||c) == 0."""
+    torch.manual_seed(7)
+    fine_logits = torch.randn(4, 100)
+    # Build coarse logits that reproduce the marginal exactly: log of the summed
+    # probabilities is a valid logit vector for that same distribution.
+    probs = F.softmax(fine_logits, dim=1)
+    M = torch.zeros(20, 100)
+    for f, c in enumerate(SPARSE2COARSE):
+        M[c, f] = 1.0
+    coarse_logits = torch.log(probs @ M.t())
+    loss = HeadAgreementLoss()(coarse_logits, fine_logits)
+    assert loss.abs().item() < 1e-5
+
+
+def test_agreement_loss_positive_when_heads_disagree_and_is_differentiable():
+    fine_logits = torch.full((1, 100), -10.0)
+    fine_logits[0, 0] = 10.0                       # fine head certain of class 0
+    coarse_logits = torch.full((1, 20), -10.0)
+    coarse_logits[0, (SPARSE2COARSE[0] + 1) % 20] = 10.0   # coarse head says otherwise
+    fine_logits.requires_grad_(True)
+    coarse_logits.requires_grad_(True)
+
+    loss = HeadAgreementLoss()(coarse_logits, fine_logits)
+    assert loss.item() > 1.0
+    loss.backward()
+    # KL is a genuine two-way constraint: both heads receive gradient.
+    assert fine_logits.grad.abs().sum() > 0
+    assert coarse_logits.grad.abs().sum() > 0

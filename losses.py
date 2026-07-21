@@ -144,6 +144,58 @@ class SoftHierarchyLoss(nn.Module):
         return self.beta * (-log_mass_in_parent).mean()
 
 
+class HeadAgreementLoss(nn.Module):
+    """L = KL( fine-marginalized parent distribution || coarse head distribution ).
+
+    Why this exists, and why SoftHierarchyLoss was not enough. Measured on
+    CIFAR-100, adding SoftHierarchyLoss did NOT reduce the head-disagreement rate
+    (see the Results table in the README). The reason is a mismatch between what
+    that loss optimizes and what `violation_rate` measures:
+
+        SoftHierarchyLoss  ties the fine distribution to the TRUE parent label.
+        violation_rate     compares the fine prediction's parent against the
+                           COARSE HEAD's prediction -- the truth never appears.
+
+    So the first loss can be fully satisfied while the two heads still contradict
+    each other. To move a metric you must put that metric's own quantity in the
+    objective. Here both distributions over the 20 parents are compared directly:
+
+        m = marginalized fine distribution   (fine probs summed within each parent)
+        c = coarse head's own distribution
+        L = KL(m || c) = sum_p m_p * (log m_p - log c_p)
+
+    KL is not symmetric, and the direction is a modelling choice. KL(m || c)
+    weights each term by m, so it punishes hardest where the FINE head is
+    confident and the coarse head disagrees -- it pulls the coarse head toward
+    the fine head's (100-way, more specific) evidence. The reverse direction would
+    do the opposite. Gradient flows into both heads, so they meet rather than one
+    chasing the other.
+
+    Everything is computed from log-probabilities for the same reason as above:
+    m_p is a sum over children, which is a logsumexp in log-space, and KL needs
+    log m and log c anyway. Forming probabilities first would only add underflow.
+    """
+
+    def __init__(self, gamma: float = 1.0):
+        super().__init__()
+        self.gamma = gamma
+        self.register_buffer("M", parent_matrix())
+
+    def forward(self, coarse_logits: torch.Tensor, fine_logits: torch.Tensor) -> torch.Tensor:
+        log_p_fine = F.log_softmax(fine_logits, dim=1)                    # (B, 100)
+
+        # Marginalize to ALL parents at once. Broadcasting the (20, 100) mask over
+        # the batch gives (B, 20, 100); -inf on non-children drops them from the
+        # reduction, so logsumexp over the last axis is a per-parent group-sum
+        # carried out in log-space.
+        masked = log_p_fine.unsqueeze(1).masked_fill(self.M.unsqueeze(0) == 0, float("-inf"))
+        log_m = torch.logsumexp(masked, dim=2)                            # (B, 20)
+
+        log_c = F.log_softmax(coarse_logits, dim=1)                       # (B, 20)
+        kl = (log_m.exp() * (log_m - log_c)).sum(dim=1)
+        return self.gamma * kl.mean()
+
+
 # ----------------------------------------------------------------------------
 # Metrics
 # ----------------------------------------------------------------------------
